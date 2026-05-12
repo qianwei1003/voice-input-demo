@@ -11,5 +11,12 @@ export default defineConfig({
       'Cross-Origin-Opener-Policy': 'same-origin',
       'Cross-Origin-Embedder-Policy': 'require-corp',
     },
+    proxy: {
+      '/api/mimo': {
+        target: 'https://api.xiaomimimo.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/mimo/, '/v1'),
+      },
+    },
   },
 })

@@ -29,7 +29,7 @@ class MimoTtsService {
   async speak(text) {
     if (!MIMO_CONFIG.apiKey) {
       console.warn('[MimoTTS] API key not set, skipping TTS')
-      return
+      return { ok: false, reason: 'API key not set' }
     }
 
     // Stop any current playback
@@ -39,17 +39,23 @@ class MimoTtsService {
     this._abortController = new AbortController()
 
     try {
-      console.log(`[MimoTTS] Synthesizing: "${text}"`)
+      const url = `${MIMO_CONFIG.baseUrl}/chat/completions`
 
-      const response = await fetch(`${MIMO_CONFIG.baseUrl}/chat/completions`, {
+      console.log(`[MimoTTS] Synthesizing: "${text}"`)
+      console.log(`[MimoTTS] API key: ${MIMO_CONFIG.apiKey.slice(0, 8)}...`)
+      console.log(`[MimoTTS] URL: ${url}`)
+
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
           'api-key': MIMO_CONFIG.apiKey,
+          'Authorization': `Bearer ${MIMO_CONFIG.apiKey}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
           model: MIMO_CONFIG.ttsModel,
           messages: [
+            { role: 'user', content: '' },
             { role: 'assistant', content: text },
           ],
           audio: {
@@ -69,22 +75,28 @@ class MimoTtsService {
       const audioBase64 = data.choices?.[0]?.message?.audio?.data
 
       if (!audioBase64) {
+        console.warn('[MimoTTS] Response:', JSON.stringify(data).slice(0, 500))
         throw new Error('No audio data in response')
       }
 
+      console.log(`[MimoTTS] Audio received: ${audioBase64.length} chars (base64)`)
+
       // Decode base64 to ArrayBuffer
       const audioBytes = this._base64ToArrayBuffer(audioBase64)
+      console.log(`[MimoTTS] Decoded to ${audioBytes.byteLength} bytes`)
 
       // Play audio
       await this._playAudio(audioBytes)
 
       console.log('[MimoTTS] Playback finished')
+      return { ok: true }
     } catch (err) {
       if (err.name === 'AbortError') {
         console.log('[MimoTTS] Playback aborted')
+        return { ok: false, reason: 'aborted' }
       } else {
         console.error('[MimoTTS] Error:', err)
-        throw err
+        return { ok: false, reason: err.message }
       }
     } finally {
       this._isSpeaking = false

@@ -13,6 +13,7 @@
 - **构建工具：** Vite 5
 - **唤醒词引擎：** Sherpa-ONNX KWS (WebAssembly)
 - **语音识别引擎：** Web Speech API / Whisper 本地 / 讯飞 / 阿里云 / 腾讯云（可插拔）
+- **语音合成 TTS：** MiMo-V2-TTS（小米 MiMo 平台，OpenAI 兼容 API）
 - **运行环境：** 浏览器（Chrome 推荐），需要麦克风
 
 ## 目录结构
@@ -40,6 +41,7 @@ voice-input-demo/
 │       ├── voiceController.js         # 核心状态机（idle→listening→waiting→confirming→sending）
 │       ├── voiceConfig.js             # 状态定义、定时器常量、多语言关键词
 │       ├── speechService.js           # ASR 引擎抽象层（可插拔）
+│       ├── mimoTtsService.js          # MiMo TTS 语音合成（调用 MiMo API 播报）
 │       ├── wakeWordService.js         # 唤醒词服务（引擎工厂）
 │       ├── keywordMatcher.js          # 关键词匹配（结束词、确认词、AI 命令）
 │       ├── whisperProvider.js         # Whisper 本地 ASR
@@ -66,6 +68,7 @@ idle → listening → waiting → confirming → sending → idle
 ```
 
 - **idle：** 等待唤醒词
+- **speaking：** TTS 语音播报中
 - **listening：** 正在录音，实时识别
 - **waiting：** 录音暂停，等待确认（确认模式下 3 秒无语音触发）
 - **confirming：** 提示用户确认/补充
@@ -116,6 +119,8 @@ idle → listening → waiting → confirming → sending → idle
 - [x] 多语言关键词匹配（结束词、确认词、AI 命令）
 - [x] 自动/确认两种发送模式
 - [x] 页面 UI 中文化
+- [x] MiMo TTS 语音播报（唤醒回复"在呢"，发送回复"收到：xxx"）
+- [x] 小方图标动画（idle/speaking/listening/waiting 状态）
 - [x] 事件日志系统
 - [x] 空格键模拟唤醒（测试用）
 - [x] Vite COOP/COEP 头配置（WASM 需要）
@@ -123,7 +128,6 @@ idle → listening → waiting → confirming → sending → idle
 ## 待开发 / 已知问题
 
 - [ ] Porcupine 引擎（等待 Picovoice 审核）
-- [ ] TTS 语音播报（prompt 事件已 emit，消费者未实现）
 - [ ] AI 对话集成（send 事件已 emit，消费者未实现）
 - [ ] Service Worker 离线支持
 - [ ] 移动端适配
@@ -143,6 +147,14 @@ WAKE_WORD_CONFIG = {
     keywordsScore: 1.0,
     keywordsThreshold: 0.25,  // 唤醒灵敏度，越低越灵敏
   }
+}
+
+MIMO_CONFIG = {
+  apiKey: import.meta.env.VITE_MIMO_API_KEY,  // .env 文件配置
+  baseUrl: 'https://api.xiaomimimo.com/v1',   // 或 token-plan-cn.xiaomimimo.com/v1
+  ttsModel: 'mimo-v2-tts',
+  voice: 'mimo_default',
+  format: 'wav',
 }
 ```
 
@@ -179,9 +191,12 @@ VoiceController 通过 `on(event, callback)` 暴露事件：
 2. Chrome 打开 `http://localhost:5173`
 3. 页面加载后应显示"语音控制器已初始化"
 4. 点"开始监听" → 允许麦克风权限
-5. 对麦克风说"小方小方" → 唤醒成功，状态变为"监听中"
+5. 对麦克风说"小方小方" → 唤醒成功，TTS 播报"在呢"，图标变绿色脉冲
 6. 说话 → 识别文本区显示文字
 7. 停顿 3 秒 → 根据发送模式自动发送或进入确认
+8. 发送后 TTS 播报"收到：xxx"
+
+**无麦克风测试：** 点"测试TTS"或"模拟对话"按钮
 
 ## 注意事项
 

@@ -5,10 +5,17 @@
 
     <!-- Status Indicator -->
     <div class="status">
-      <span :class="['dot', stateClass]"></span>
-      <span class="state-text">{{ stateText }}</span>
-      <span class="mode-badge" v-if="sendMode">{{ sendMode }}</span>
-      <span class="engine-badge" v-if="engineName">{{ engineName }}</span>
+      <div :class="['avatar', stateClass]">
+        <div class="avatar-ring"></div>
+        <div class="avatar-core">小方</div>
+      </div>
+      <div class="status-info">
+        <span class="state-text">{{ stateText }}</span>
+        <div class="badges">
+          <span class="mode-badge" v-if="sendMode">{{ sendMode }}</span>
+          <span class="engine-badge" v-if="engineName">{{ engineName }}</span>
+        </div>
+      </div>
     </div>
 
     <!-- Wake Word Status -->
@@ -73,6 +80,12 @@
       <button class="ctrl-btn wake" @click="simulateWake" :disabled="state !== 'idle'">
         模拟唤醒词
       </button>
+      <button class="ctrl-btn tts" @click="testTts" :disabled="state !== 'idle'">
+        测试TTS
+      </button>
+      <button class="ctrl-btn simulate" @click="simulateConversation" :disabled="state !== 'idle'">
+        模拟对话
+      </button>
     </div>
 
     <!-- Transcript Display -->
@@ -91,6 +104,9 @@
     <div class="reply-box" v-if="currentReply && state === 'speaking'">
       <div class="label">语音播报：</div>
       <div class="reply-text">{{ currentReply }}</div>
+      <div class="waveform">
+        <span></span><span></span><span></span><span></span><span></span>
+      </div>
     </div>
 
     <!-- AI Command Display -->
@@ -132,6 +148,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { speechService, ENGINES } from './services/speechService.js'
 import { VoiceController } from './services/voiceController.js'
+import { mimoTtsService } from './services/mimoTtsService.js'
 import { VOICE_STATE, VOICE_LOCALES } from './services/voiceConfig.js'
 import { WAKE_WORD_CONFIG } from './config.js'
 
@@ -223,6 +240,78 @@ function manualStop() {
 function simulateWake() {
   voiceController._onWakeWord()
     addLog('control', '模拟唤醒词触发')
+}
+
+// Test TTS directly (no microphone needed)
+async function testTts() {
+  addLog('tts', '测试 TTS: "在呢"')
+  currentReply.value = '在呢'
+  state.value = 'speaking'
+  try {
+    const result = await mimoTtsService.speak('在呢')
+    if (result?.ok) {
+      addLog('tts', 'TTS 播报成功')
+    } else {
+      addLog('error', `TTS 未播报: ${result?.reason || '未知原因'}`)
+    }
+  } catch (err) {
+    addLog('error', `TTS 失败: ${err.message}`)
+  } finally {
+    state.value = 'idle'
+    currentReply.value = ''
+  }
+}
+
+// Simulate full conversation flow (no microphone needed)
+async function simulateConversation() {
+  addLog('simulate', '模拟对话开始')
+  currentReply.value = '在呢'
+  state.value = 'speaking'
+
+  try {
+    // Step 1: TTS "在呢"
+    addLog('tts', '播报: "在呢"')
+    const r1 = await mimoTtsService.speak('在呢')
+    if (r1?.ok) {
+      addLog('tts', '"在呢" 播报成功')
+    } else {
+      addLog('error', `TTS 失败: ${r1?.reason}`)
+    }
+
+    // Step 2: Simulate user speaking (1.5s delay)
+    state.value = 'listening'
+    addLog('state', '→ listening (模拟)')
+    transcript.value = ''
+    await new Promise(r => setTimeout(r, 1500))
+
+    const mockText = '明天天气怎么样'
+    transcript.value = mockText
+    addLog('transcript', `[模拟] ${mockText}`)
+
+    // Step 3: Simulate thinking (1s delay)
+    await new Promise(r => setTimeout(r, 1000))
+
+    // Step 4: TTS reply
+    const reply = `收到：${mockText}`
+    currentReply.value = reply
+    state.value = 'speaking'
+    addLog('send', `发送: "${mockText}"`)
+    addLog('tts', `播报: "${reply}"`)
+    const r2 = await mimoTtsService.speak(reply)
+    if (r2?.ok) {
+      addLog('tts', '回复播报成功')
+    } else {
+      addLog('error', `TTS 失败: ${r2?.reason}`)
+    }
+
+  } catch (err) {
+    addLog('error', `模拟对话失败: ${err.message}`)
+  } finally {
+    state.value = 'idle'
+    transcript.value = ''
+    currentReply.value = ''
+    addLog('simulate', '模拟对话结束')
+  }
 }
 
 // Setup event listeners
@@ -326,28 +415,122 @@ h1 { margin-bottom: 4px; }
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 16px;
   margin-bottom: 16px;
-  padding: 12px;
+  padding: 20px;
   background: #1a1a2e;
-  border-radius: 8px;
+  border-radius: 12px;
 }
-.dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: #666;
+.status-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
-.dot.recording { background: #e74c3c; animation: pulse 1s infinite; }
-.dot.speaking { background: #2ecc71; animation: pulse 0.8s infinite; }
-.dot.waiting { background: #f39c12; animation: blink 1.5s infinite; }
-.dot.confirming { background: #3498db; animation: blink 1s infinite; }
-.dot.sending { background: #27ae60; }
-.dot.idle { background: #555; }
-@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
-@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+.badges {
+  display: flex;
+  gap: 6px;
+}
 
-.state-text { font-size: 14px; font-weight: 500; }
+/* Avatar Icon */
+.avatar {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  flex-shrink: 0;
+}
+.avatar-core {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: #2a2a3e;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: bold;
+  color: #666;
+  position: relative;
+  z-index: 1;
+  transition: all 0.3s;
+}
+.avatar-ring {
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  border: 3px solid transparent;
+  transition: all 0.3s;
+}
+
+/* Idle */
+.avatar.idle .avatar-core {
+  background: #2a2a3e;
+  color: #666;
+}
+
+/* Speaking - green pulse */
+.avatar.speaking .avatar-core {
+  background: #1a3a2a;
+  color: #2ecc71;
+  box-shadow: 0 0 20px rgba(46, 204, 113, 0.3);
+}
+.avatar.speaking .avatar-ring {
+  border-color: #2ecc71;
+  animation: ring-pulse 1s ease-in-out infinite;
+}
+
+/* Listening - red recording */
+.avatar.recording .avatar-core {
+  background: #3a1a1a;
+  color: #e74c3c;
+  box-shadow: 0 0 20px rgba(231, 76, 60, 0.3);
+}
+.avatar.recording .avatar-ring {
+  border-color: #e74c3c;
+  animation: ring-pulse 1.2s ease-in-out infinite;
+}
+
+/* Waiting - orange blink */
+.avatar.waiting .avatar-core {
+  background: #3a2a1a;
+  color: #f39c12;
+}
+.avatar.waiting .avatar-ring {
+  border-color: #f39c12;
+  animation: ring-blink 1.5s ease-in-out infinite;
+}
+
+/* Confirming - blue */
+.avatar.confirming .avatar-core {
+  background: #1a2a3a;
+  color: #3498db;
+}
+.avatar.confirming .avatar-ring {
+  border-color: #3498db;
+  animation: ring-blink 1s ease-in-out infinite;
+}
+
+/* Sending - green solid */
+.avatar.sending .avatar-core {
+  background: #1a3a2a;
+  color: #27ae60;
+}
+.avatar.sending .avatar-ring {
+  border-color: #27ae60;
+}
+
+@keyframes ring-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.15); opacity: 0.5; }
+}
+@keyframes ring-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.state-text { font-size: 15px; font-weight: 500; }
 .mode-badge, .engine-badge {
   font-size: 11px;
   padding: 2px 8px;
@@ -447,6 +630,8 @@ select {
 .ctrl-btn.start { background: #27ae60; color: #fff; }
 .ctrl-btn.stop { background: #e74c3c; color: #fff; }
 .ctrl-btn.wake { background: #3498db; color: #fff; }
+.ctrl-btn.tts { background: #9b59b6; color: #fff; }
+.ctrl-btn.simulate { background: #e67e22; color: #fff; }
 
 .transcript-box {
   background: #1a3a5c;
@@ -477,6 +662,31 @@ select {
 }
 .reply-box .label { font-size: 12px; color: #2ecc71; margin-bottom: 4px; }
 .reply-text { color: #2ecc71; font-size: 16px; font-weight: 500; }
+
+/* Audio waveform animation */
+.waveform {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 8px;
+  height: 24px;
+}
+.waveform span {
+  display: inline-block;
+  width: 4px;
+  background: #2ecc71;
+  border-radius: 2px;
+  animation: wave 0.8s ease-in-out infinite;
+}
+.waveform span:nth-child(1) { height: 8px; animation-delay: 0s; }
+.waveform span:nth-child(2) { height: 16px; animation-delay: 0.1s; }
+.waveform span:nth-child(3) { height: 24px; animation-delay: 0.2s; }
+.waveform span:nth-child(4) { height: 16px; animation-delay: 0.3s; }
+.waveform span:nth-child(5) { height: 8px; animation-delay: 0.4s; }
+@keyframes wave {
+  0%, 100% { transform: scaleY(0.4); }
+  50% { transform: scaleY(1); }
+}
 
 .command-box {
   background: #1a2a1a;
@@ -531,6 +741,8 @@ select {
 .log-entry.timeout .log-type { color: #e74c3c; }
 .log-entry.error .log-type { color: #e74c3c; }
 .log-entry.error .log-msg { color: #e74c3c; }
+.log-entry.tts .log-type { color: #9b59b6; }
+.log-entry.simulate .log-type { color: #e67e22; }
 
 .config-info {
   background: #16213e;

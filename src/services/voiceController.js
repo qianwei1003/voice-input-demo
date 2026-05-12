@@ -212,13 +212,15 @@ class VoiceController {
 
     // TTS 播报"在呢"，播完后开始监听
     this._setState(VOICE_STATE.SPEAKING)
-    mimoTtsService.speak('在呢').then(() => {
+    mimoTtsService.speak('在呢').then((result) => {
+      if (!result?.ok) {
+        console.warn('[VoiceController] TTS "在呢" failed:', result?.reason)
+      }
       if (this.state.value === VOICE_STATE.SPEAKING) {
         this._startListening()
       }
     }).catch((err) => {
       console.error('[VoiceController] TTS error:', err)
-      // TTS 失败也继续监听
       if (this.state.value === VOICE_STATE.SPEAKING) {
         this._startListening()
       }
@@ -467,7 +469,10 @@ class VoiceController {
     // TTS 播报回复，播完后回到待机
     const reply = `收到：${text}`
     this._setState(VOICE_STATE.SPEAKING)
-    mimoTtsService.speak(reply).then(() => {
+    mimoTtsService.speak(reply).then((result) => {
+      if (!result?.ok) {
+        console.warn('[VoiceController] TTS reply failed:', result?.reason)
+      }
       this._backToIdle()
     }).catch((err) => {
       console.error('[VoiceController] TTS reply error:', err)

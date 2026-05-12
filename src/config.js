@@ -105,8 +105,8 @@ export const TENCENT_CONFIG = {
 // 注册地址: https://platform.xiaomimimo.com
 // 免费额度: MiMo-V2-TTS:0x 限时免费
 export const MIMO_CONFIG = {
-  apiKey: import.meta.env.VITE_MIMO_API_KEY || '',
-  baseUrl: 'https://api.xiaomimimo.com/v1',
+  apiKey: (import.meta.env.VITE_MIMO_API_KEY || '').trim(),
+  baseUrl: 'https://token-plan-cn.xiaomimimo.com/v1',
   ttsModel: 'mimo-v2-tts',
   voice: 'mimo_default',
   format: 'wav',
