@@ -103,12 +103,12 @@ class SpeechService {
     // 本地引擎
     this.webSpeechProvider = new WebSpeechProvider()
     this.whisperProvider = new WhisperProvider()
-    
+
     // 云端引擎
     this.iFlytekProvider = new iFlytekProvider()
     this.aliyunProvider = new AliyunProvider()
     this.tencentProvider = new TencentProvider()
-    
+
     // 状态
     this.status = ref('idle')
     this.transcript = ref('')
@@ -118,10 +118,16 @@ class SpeechService {
     this.engine = ref(DEFAULT_ENGINE)
     this.currentProvider = null
     this.engines = ENGINES
-    
+
     // Whisper 配置信息
     this.whisperCacheStrategy = WHISPER_CONFIG.cacheStrategy || 'session'
     this.whisperModel = WHISPER_CONFIG.model || 'tiny'
+
+    // External callbacks (used by VoiceController)
+    this.onResult = null
+    this.onInterim = null
+    this.onError = null
+    this.onEnd = null
   }
 
   isSupported() {
@@ -181,14 +187,22 @@ class SpeechService {
     // 设置回调
     provider.onLoading = (msg) => { this.loading.value = msg }
     provider.onStart = () => { this.status.value = 'recording' }
-    provider.onEnd = () => { 
-      if (this.status.value !== 'error') this.status.value = 'idle' 
+    provider.onEnd = () => {
+      if (this.status.value !== 'error') this.status.value = 'idle'
+      this.onEnd?.()
     }
-    provider.onResult = (text) => { this.transcript.value += text }
-    provider.onInterim = (text) => { this.interim.value = text }
-    provider.onError = (err) => { 
+    provider.onResult = (text) => {
+      this.transcript.value += text
+      this.onResult?.(text)
+    }
+    provider.onInterim = (text) => {
+      this.interim.value = text
+      this.onInterim?.(text)
+    }
+    provider.onError = (err) => {
       this.error.value = String(err)
       this.status.value = 'error'
+      this.onError?.(err)
     }
 
     try {

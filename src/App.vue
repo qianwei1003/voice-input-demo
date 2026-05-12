@@ -1,24 +1,24 @@
 <template>
   <div class="container">
-    <h1>Voice Input Demo</h1>
-    <p class="subtitle">Multi-Engine Speech Recognition</p>
+    <h1>语音控制器测试</h1>
+    <p class="subtitle">唤醒词："小方小方" · 纯能力层</p>
 
-    <!-- Status -->
+    <!-- Status Indicator -->
     <div class="status">
-      <span :class="['dot', statusClass]"></span>
-      <span>{{ statusText }}</span>
+      <span :class="['dot', stateClass]"></span>
+      <span class="state-text">{{ stateText }}</span>
+      <span class="mode-badge" v-if="sendMode">{{ sendMode }}</span>
       <span class="engine-badge" v-if="engineName">{{ engineName }}</span>
     </div>
 
-    <!-- Loading -->
-    <div class="loading" v-if="loading">
-      <span class="loading-icon">⏳</span>
-      {{ loading }}
+    <!-- Wake Word Status -->
+    <div class="wake-status" v-if="!porcupineEnabled">
+      <span class="warn">唤醒词未启用，请在 config.js 中设置 WAKE_WORD_CONFIG.enabled</span>
     </div>
 
     <!-- Engine Selector -->
     <div class="engine-selector">
-      <label>Select Engine:</label>
+      <label>语音识别引擎：</label>
       <div class="engine-options">
         <button
           v-for="eng in availableEngines"
@@ -28,309 +28,493 @@
           @click="selectEngine(eng.id)"
         >
           <span class="eng-name">{{ eng.name }}</span>
-          <span class="eng-tag">{{ eng.tag }}</span>
-          <span v-if="eng.free" class="free-badge">FREE</span>
-          <span v-if="eng.needsConfig && !eng.configured" class="config-badge">NEED CONFIG</span>
+          <span v-if="eng.free" class="free-badge">免费</span>
+          <span v-if="eng.needsConfig && !eng.configured" class="config-badge">需配置</span>
         </button>
       </div>
     </div>
 
+    <!-- Send Mode Toggle -->
+    <div class="mode-toggle">
+      <label>发送模式：</label>
+      <button
+        :class="['mode-btn', { active: sendMode === 'auto' }]"
+        @click="setMode('auto')"
+      >
+        自动 (3秒)
+      </button>
+      <button
+        :class="['mode-btn', { active: sendMode === 'confirm' }]"
+        @click="setMode('confirm')"
+      >
+        确认
+      </button>
+    </div>
+
     <!-- Language Selector -->
     <div class="lang-row">
-      <label>Language:</label>
-      <select v-model="lang" :disabled="isRecording">
-        <option value="zh-CN">Chinese</option>
-        <option value="en-US">English</option>
-        <option value="ja-JP">Japanese</option>
-        <option value="ko-KR">Korean</option>
+      <label>语言：</label>
+      <select v-model="lang" :disabled="state !== 'idle'">
+        <option value="zh-CN">中文</option>
+        <option value="en-US">英文</option>
+        <option value="ja-JP">日文</option>
+        <option value="ko-KR">韩文</option>
       </select>
     </div>
 
-    <!-- Mic Button -->
-    <div class="mic-wrap">
-      <button
-        :class="['mic-btn', { recording: isRecording, supported: isSupported, loading: !!loading }]"
-        @click="toggleRecord"
-        :disabled="!isSupported || !!loading"
-      >
-        <span v-if="isRecording" class="mic-icon">⏹</span>
-        <span v-else class="mic-icon">🎤</span>
+    <!-- Manual Controls -->
+    <div class="controls">
+      <button class="ctrl-btn start" @click="manualStart" :disabled="state !== 'idle'">
+        开始监听
       </button>
-      <p class="hint">{{ hintText }}</p>
+      <button class="ctrl-btn stop" @click="manualStop" :disabled="state === 'idle'">
+        停止
+      </button>
+      <button class="ctrl-btn wake" @click="simulateWake" :disabled="state !== 'idle'">
+        模拟唤醒词
+      </button>
     </div>
 
-    <!-- Interim Result -->
-    <div class="interim-box" v-if="interim">
-      <div class="label">Interim:</div>
-      <div class="interim">{{ interim }}</div>
+    <!-- Transcript Display -->
+    <div class="transcript-box" v-if="transcript || interim">
+      <div class="label">识别文本：</div>
+      <div class="text">{{ transcript }}<span class="interim">{{ interim }}</span></div>
     </div>
 
-    <!-- Final Result -->
-    <div class="result-box" v-if="transcript">
-      <div class="label">Result:</div>
-      <div class="text">{{ transcript }}</div>
-      <div class="result-actions">
-        <button class="action-btn" @click="copyText">Copy</button>
-        <button class="action-btn" @click="clearText">Clear</button>
+    <!-- Prompt Display -->
+    <div class="prompt-box" v-if="currentPrompt">
+      <div class="label">提示（TTS就绪）：</div>
+      <div class="prompt-text">{{ currentPrompt }}</div>
+    </div>
+
+    <!-- AI Command Display -->
+    <div class="command-box" v-if="lastAICommand">
+      <div class="label">AI 命令：</div>
+      <div class="command-text">{{ lastAICommand }}</div>
+    </div>
+
+    <!-- Event Log -->
+    <div class="event-log">
+      <div class="log-header">
+        <span class="label">事件日志：</span>
+        <button class="clear-btn" @click="clearLog">清空</button>
       </div>
-    </div>
-
-    <!-- Error -->
-    <div class="error" v-if="error">{{ error }}</div>
-
-    <!-- Config Guide -->
-    <div class="config-guide">
-      <h3>Engine Configuration</h3>
-      <div class="config-grid">
-        <div class="config-item">
-          <strong>Web Speech API</strong>
-          <p>No config needed. Uses Google servers.</p>
-          <p class="note">⚠️ May be unstable in China</p>
-        </div>
-        <div class="config-item">
-          <strong>Whisper Local</strong>
-          <p>No config needed. Runs in browser.</p>
-          <p class="note">⚠️ Requires WebGPU support</p>
-        </div>
-        <div class="config-item">
-          <strong>iFlytek</strong>
-          <p>Register at xfyun.cn, fill appid/apiKey/apiSecret in config.js</p>
-        </div>
-        <div class="config-item">
-          <strong>Aliyun ASR</strong>
-          <p>Register at aliyun.com, fill appkey/accessKeyId/accessKeySecret in config.js</p>
-        </div>
-        <div class="config-item">
-          <strong>Tencent ASR</strong>
-          <p>Register at cloud.tencent.com, fill appid/secretId/secretKey in config.js</p>
+      <div class="log-entries">
+        <div v-for="(entry, i) in eventLog" :key="i" :class="['log-entry', entry.type]">
+          <span class="log-time">{{ entry.time }}</span>
+          <span class="log-type">[{{ entry.type }}]</span>
+          <span class="log-msg">{{ entry.message }}</span>
         </div>
       </div>
     </div>
 
-    <!-- Tech Info -->
-    <div class="tech-info">
-      <h3>Engine Comparison</h3>
-      <table class="compare-table">
-        <thead>
-          <tr>
-            <th>Engine</th>
-            <th>Latency</th>
-            <th>Accuracy</th>
-            <th>Cost</th>
-            <th>Network</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>Web Speech API</td>
-            <td>0.5-1.5s</td>
-            <td>85-93%</td>
-            <td>Free</td>
-            <td>Required</td>
-          </tr>
-          <tr>
-            <td>Whisper tiny</td>
-            <td>2-4s (GPU)</td>
-            <td>85-88%</td>
-            <td>Free</td>
-            <td>Not needed</td>
-          </tr>
-          <tr>
-            <td>Whisper base</td>
-            <td>4-8s (GPU)</td>
-            <td>91-94%</td>
-            <td>Free</td>
-            <td>Not needed</td>
-          </tr>
-          <tr>
-            <td>iFlytek / Aliyun / Tencent</td>
-            <td>0.3-1s</td>
-            <td>95-98%</td>
-            <td>¥0.5/1K</td>
-            <td>Required</td>
-          </tr>
-        </tbody>
-      </table>
+    <!-- Config Info -->
+    <div class="config-info">
+      <h3>配置信息</h3>
+      <p>当前引擎: <code>{{ WAKE_WORD_CONFIG.engine }}</code></p>
+      <p>切换引擎：修改 <code>src/config.js</code> 中 <code>WAKE_WORD_CONFIG.engine</code></p>
+      <ul>
+        <li><code>'placeholder'</code> - 空格键模拟唤醒（测试用）</li>
+        <li><code>'sherpa-kws'</code> - Sherpa-ONNX KWS（需要构建WASM）</li>
+        <li><code>'porcupine'</code> - Porcupine（等待审核）</li>
+      </ul>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { speechService, ENGINES } from './services/speechService.js'
+import { VoiceController } from './services/voiceController.js'
+import { VOICE_STATE, VOICE_LOCALES } from './services/voiceConfig.js'
+import { WAKE_WORD_CONFIG } from './config.js'
 
-// Engines
-const availableEngines = computed(() => speechService.getAvailableEngines())
+// Voice Controller instance
+const voiceController = new VoiceController()
 
 // State
-const activeEngine = ref('webspeech')
-const isSupported = ref(true)
-const isRecording = ref(false)
+const state = ref('idle')
 const transcript = ref('')
 const interim = ref('')
-const error = ref('')
-const loading = ref('')
+const sendMode = ref('confirm')
 const lang = ref('zh-CN')
+const activeEngine = ref('webspeech')
 const engineName = ref('Web Speech API')
+const currentPrompt = ref('')
+const lastAICommand = ref('')
+const eventLog = ref([])
+const porcupineEnabled = ref(WAKE_WORD_CONFIG.enabled)
 
-const statusClass = computed(() => {
-  if (loading.value) return 'loading'
-  if (error.value) return 'error'
-  if (isRecording.value) return 'recording'
-  return 'idle'
+// Available engines
+const availableEngines = computed(() => speechService.getAvailableEngines())
+
+// State display
+const stateClass = computed(() => {
+  switch (state.value) {
+    case 'listening': return 'recording'
+    case 'waiting': return 'waiting'
+    case 'confirming': return 'confirming'
+    case 'sending': return 'sending'
+    default: return 'idle'
+  }
 })
 
-const statusText = computed(() => {
-  if (loading.value) return 'Loading...'
-  if (error.value) return 'Error'
-  if (isRecording.value) return 'Recording...'
-  return 'Ready'
+const stateText = computed(() => {
+  switch (state.value) {
+    case 'idle': return '空闲（等待唤醒词）'
+    case 'listening': return '监听中...'
+    case 'waiting': return '等待中（确认模式）'
+    case 'confirming': return '确认中...'
+    case 'sending': return '发送中...'
+    default: return state.value
+  }
 })
 
-const hintText = computed(() => {
-  if (loading.value) return 'Please wait...'
-  if (!isSupported.value) return 'Not supported'
-  if (isRecording.value) return 'Listening... Click to stop'
-  return 'Click mic to start'
-})
-
-function selectEngine(eng) {
-  if (isRecording.value) return
-  activeEngine.value = eng
-  engineName.value = availableEngines.value.find(e => e.id === eng)?.name || eng
+// Logging
+function addLog(type, message) {
+  const now = new Date()
+  const time = now.toLocaleTimeString('zh-CN', { hour12: false })
+  eventLog.value.unshift({ type, message, time })
+  if (eventLog.value.length > 50) eventLog.value.pop()
 }
 
-async function toggleRecord() {
-  if (isRecording.value) {
-    speechService.stop()
-    isRecording.value = false
-  } else {
+function clearLog() {
+  eventLog.value = []
+}
+
+// Engine selection
+function selectEngine(eng) {
+  if (state.value !== 'idle') return
+  activeEngine.value = eng
+  engineName.value = availableEngines.value.find((e) => e.id === eng)?.name || eng
+}
+
+// Mode toggle
+function setMode(mode) {
+  sendMode.value = mode
+  voiceController.setSendMode(mode)
+    addLog('config', `发送模式: ${mode}`)
+}
+
+// Manual controls
+async function manualStart() {
+  try {
+    await voiceController.start()
+    addLog('control', '手动启动')
+  } catch (err) {
+    addLog('error', err.message)
+  }
+}
+
+function manualStop() {
+  voiceController.stop()
+    addLog('control', '手动停止')
+}
+
+function simulateWake() {
+  voiceController._onWakeWord()
+    addLog('control', '模拟唤醒词触发')
+}
+
+// Setup event listeners
+function setupListeners() {
+  voiceController.on('wakeWord', () => {
+    addLog('wake', '唤醒词检测到！')
+    currentPrompt.value = ''
+    lastAICommand.value = ''
+  })
+
+  voiceController.on('stateChange', (newState) => {
+    state.value = newState
+    addLog('state', `→ ${newState}`)
+  })
+
+  voiceController.on('transcript', (text) => {
+    transcript.value = text
+    addLog('transcript', text)
+  })
+
+  voiceController.on('interim', (text) => {
+    interim.value = text
+  })
+
+  voiceController.on('send', (text) => {
+    addLog('send', `发送: "${text}"`)
     transcript.value = ''
     interim.value = ''
-    error.value = ''
+  })
 
-    try {
-      await speechService.start(activeEngine.value, lang.value)
-      isRecording.value = true
-    } catch (e) {
-      error.value = e.message
-    }
-  }
+  voiceController.on('prompt', (msgKey) => {
+    const locale = voiceController.locale.value
+    const keywords = VOICE_LOCALES[locale]
+    const msg = keywords?.[msgKey] || msgKey
+    currentPrompt.value = msg
+    addLog('prompt', msg)
+  })
+
+  voiceController.on('aiCommand', (type) => {
+    lastAICommand.value = `AI 命令: ${type}`
+    addLog('command', `AI ${type}`)
+    transcript.value = ''
+    interim.value = ''
+  })
+
+  voiceController.on('timeout', () => {
+    addLog('timeout', '硬超时，已回到空闲状态')
+    transcript.value = ''
+    interim.value = ''
+    currentPrompt.value = ''
+  })
+
+  voiceController.on('error', (err) => {
+    addLog('error', String(err))
+  })
 }
 
-function copyText() {
-  navigator.clipboard.writeText(transcript.value)
-}
+// Lifecycle
+onMounted(async () => {
+  setupListeners()
 
-function clearText() {
-  transcript.value = ''
-}
+  // Set initial engine
+  const eng = speechService.engine?.value || 'webspeech'
+  activeEngine.value = eng
+  engineName.value = availableEngines.value.find((e) => e.id === eng)?.name || eng
 
-// Watch service state
-watch(() => speechService.status.value, (newStatus) => {
-  if (newStatus === 'recording') {
-    isRecording.value = true
-  } else {
-    isRecording.value = false
+  // Set initial send mode
+  voiceController.setSendMode(sendMode.value)
+  voiceController.setLocale(lang.value)
+
+  // Initialize voice controller
+  try {
+    await voiceController.init()
+    addLog('init', '语音控制器已初始化')
+  } catch (err) {
+    addLog('error', `初始化失败: ${err.message}`)
   }
 })
 
-watch(() => speechService.transcript.value, (val) => {
-  transcript.value = val
-})
-
-watch(() => speechService.interim.value, (val) => {
-  interim.value = val
-})
-
-watch(() => speechService.error.value, (val) => {
-  error.value = val
-})
-
-watch(() => speechService.loading.value, (val) => {
-  loading.value = val
-})
-
-watch(() => speechService.engine.value, (val) => {
-  engineName.value = availableEngines.value.find(e => e.id === val)?.name || val
-})
-
-onMounted(() => {
-  isSupported.value = speechService.isSupported()
-  if (!isSupported.value) {
-    error.value = 'Audio not supported. Use Chrome/Edge.'
-  }
+onUnmounted(() => {
+  voiceController.destroy()
 })
 </script>
 
 <style scoped>
-.container { max-width: 800px; margin: 0 auto; padding: 20px; }
+.container {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 20px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
 h1 { margin-bottom: 4px; }
-.subtitle { color: #888; margin-bottom: 16px; }
+.subtitle { color: #888; margin-bottom: 16px; font-size: 14px; }
 
-.status { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 16px; }
-.dot { width: 12px; height: 12px; border-radius: 50%; background: #666; }
+.status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 12px;
+  background: #1a1a2e;
+  border-radius: 8px;
+}
+.dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #666;
+}
 .dot.recording { background: #e74c3c; animation: pulse 1s infinite; }
-.dot.error { background: #e74c3c; }
-.dot.idle { background: #27ae60; }
-.dot.loading { background: #f39c12; animation: blink 1s infinite; }
+.dot.waiting { background: #f39c12; animation: blink 1.5s infinite; }
+.dot.confirming { background: #3498db; animation: blink 1s infinite; }
+.dot.sending { background: #27ae60; }
+.dot.idle { background: #555; }
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
-@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.5} }
-.engine-badge { font-size: 12px; padding: 2px 8px; background: #16213e; border-radius: 4px; color: #888; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
 
-.loading { background: #2a2a1a; border: 1px solid #f39c12; border-radius: 8px; padding: 12px; margin: 16px 0; color: #f39c12; font-size: 14px; }
-.loading-icon { margin-right: 8px; }
+.state-text { font-size: 14px; font-weight: 500; }
+.mode-badge, .engine-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #16213e;
+  color: #888;
+}
 
-.engine-selector { margin-bottom: 20px; }
-.engine-selector label { display: block; margin-bottom: 10px; font-size: 14px; color: #888; }
-.engine-options { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
-.engine-btn { padding: 12px 16px; border: 2px solid #333; background: #16213e; color: #ccc; border-radius: 10px; cursor: pointer; font-size: 13px; transition: all 0.2s; display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 140px; }
+.wake-status {
+  text-align: center;
+  margin-bottom: 16px;
+  padding: 8px;
+  background: #2a2a1a;
+  border: 1px solid #f39c12;
+  border-radius: 6px;
+}
+.warn { color: #f39c12; font-size: 13px; }
+
+.engine-selector { margin-bottom: 16px; }
+.engine-selector label { display: block; margin-bottom: 8px; font-size: 13px; color: #888; }
+.engine-options { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.engine-btn {
+  padding: 8px 12px;
+  border: 2px solid #333;
+  background: #16213e;
+  color: #ccc;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.2s;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 100px;
+}
 .engine-btn:hover:not(:disabled) { border-color: #555; }
 .engine-btn.active { border-color: #3498db; background: #1a4a7a; color: #fff; }
 .engine-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.eng-name { font-weight: bold; font-size: 14px; }
-.eng-tag { font-size: 11px; color: #888; }
-.free-badge { background: #27ae60; color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 4px; margin-top: 4px; }
-.config-badge { background: #e74c3c; color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 4px; margin-top: 4px; }
+.eng-name { font-weight: bold; font-size: 13px; }
+.free-badge { background: #27ae60; color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 4px; }
+.config-badge { background: #e74c3c; color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 4px; }
 
-.lang-row { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 20px; }
-select { padding: 6px 12px; border-radius: 6px; border: 1px solid #555; background: #16213e; color: #eee; font-size: 14px; }
+.mode-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.mode-toggle label { font-size: 13px; color: #888; }
+.mode-btn {
+  padding: 8px 16px;
+  border: 2px solid #333;
+  background: #16213e;
+  color: #ccc;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s;
+}
+.mode-btn.active { border-color: #3498db; background: #1a4a7a; color: #fff; }
 
-.mic-wrap { margin: 20px 0; }
-.mic-btn { width: 100px; height: 100px; border-radius: 50%; border: 4px solid #333; background: #0f3460; color: #fff; font-size: 40px; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; justify-content: center; }
-.mic-btn.supported { border-color: #27ae60; }
-.mic-btn.supported:hover:not(:disabled) { background: #1652a5; transform: scale(1.05); }
-.mic-btn.recording { border-color: #e74c3c; background: #c0392b; animation: pulse 1s infinite; }
-.mic-btn.loading { border-color: #f39c12; background: #7d6608; }
-.mic-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-@keyframes pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.05)} }
-.hint { margin-top: 8px; font-size: 14px; color: #888; }
+.lang-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.lang-row label { font-size: 13px; color: #888; }
+select {
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid #555;
+  background: #16213e;
+  color: #eee;
+  font-size: 13px;
+}
 
-.interim-box { background: #1a3a5c; border-radius: 8px; padding: 12px; margin: 12px 0; }
-.interim-box .label { font-size: 12px; color: #888; margin-bottom: 4px; }
+.controls {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin-bottom: 20px;
+}
+.ctrl-btn {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+.ctrl-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.ctrl-btn.start { background: #27ae60; color: #fff; }
+.ctrl-btn.stop { background: #e74c3c; color: #fff; }
+.ctrl-btn.wake { background: #3498db; color: #fff; }
+
+.transcript-box {
+  background: #1a3a5c;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+.transcript-box .label { font-size: 12px; color: #888; margin-bottom: 4px; }
+.transcript-box .text { font-size: 18px; line-height: 1.5; }
 .interim { color: #5dade2; font-style: italic; }
 
-.result-box { background: #16213e; border-radius: 12px; padding: 16px; margin: 16px 0; text-align: left; }
-.result-box .label { font-size: 12px; color: #888; margin-bottom: 8px; }
-.result-box .text { font-size: 20px; line-height: 1.6; margin-bottom: 12px; word-break: break-all; }
-.result-actions { display: flex; gap: 8px; }
-.action-btn { padding: 6px 14px; background: #0f3460; border: none; color: #ccc; border-radius: 6px; cursor: pointer; font-size: 13px; }
-.action-btn:hover { background: #1652a5; }
+.prompt-box {
+  background: #2a2a1a;
+  border: 1px solid #f39c12;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+.prompt-box .label { font-size: 12px; color: #f39c12; margin-bottom: 4px; }
+.prompt-text { color: #f39c12; font-size: 16px; }
 
-.error { background: #2a1a1a; border: 1px solid #e74c3c; border-radius: 8px; padding: 12px; margin: 16px 0; color: #e74c3c; font-size: 14px; text-align: left; }
+.command-box {
+  background: #1a2a1a;
+  border: 1px solid #27ae60;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+.command-box .label { font-size: 12px; color: #27ae60; margin-bottom: 4px; }
+.command-text { color: #27ae60; font-size: 16px; font-weight: 500; }
 
-.config-guide { margin-top: 30px; padding: 16px; background: #16213e; border-radius: 12px; text-align: left; }
-.config-guide h3 { font-size: 16px; margin-bottom: 12px; }
-.config-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.config-item { background: #0d1b2a; border-radius: 8px; padding: 12px; font-size: 12px; }
-.config-item strong { color: #3498db; margin-bottom: 6px; display: block; }
-.config-item p { color: #aaa; margin: 4px 0; }
-.config-item .note { color: #f39c12; font-size: 11px; }
+.event-log {
+  background: #0d1b2a;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 16px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.log-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.log-header .label { font-size: 12px; color: #888; }
+.clear-btn {
+  padding: 4px 8px;
+  background: #16213e;
+  border: none;
+  color: #888;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+}
+.log-entries { font-family: monospace; font-size: 12px; }
+.log-entry {
+  padding: 3px 0;
+  border-bottom: 1px solid #1a2a3e;
+  display: flex;
+  gap: 8px;
+}
+.log-time { color: #555; min-width: 80px; }
+.log-type { color: #888; min-width: 80px; text-transform: uppercase; }
+.log-msg { color: #ccc; flex: 1; }
+.log-entry.wake .log-type { color: #e74c3c; }
+.log-entry.state .log-type { color: #3498db; }
+.log-entry.transcript .log-type { color: #5dade2; }
+.log-entry.send .log-type { color: #27ae60; }
+.log-entry.prompt .log-type { color: #f39c12; }
+.log-entry.command .log-type { color: #9b59b6; }
+.log-entry.timeout .log-type { color: #e74c3c; }
+.log-entry.error .log-type { color: #e74c3c; }
+.log-entry.error .log-msg { color: #e74c3c; }
 
-.tech-info { margin-top: 20px; padding: 16px; background: #16213e; border-radius: 12px; text-align: left; }
-.tech-info h3 { font-size: 16px; margin-bottom: 12px; }
-.compare-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.compare-table th, .compare-table td { padding: 10px; text-align: left; border-bottom: 1px solid #333; }
-.compare-table th { color: #888; font-weight: normal; }
-.compare-table td { color: #ccc; }
+.config-info {
+  background: #16213e;
+  border-radius: 8px;
+  padding: 16px;
+}
+.config-info h3 { font-size: 14px; margin-bottom: 10px; }
+.config-info ol { padding-left: 20px; font-size: 13px; color: #aaa; }
+.config-info li { margin-bottom: 6px; }
+.config-info a { color: #3498db; }
+.config-info code { background: #0d1b2a; padding: 2px 6px; border-radius: 4px; font-size: 12px; }
 </style>

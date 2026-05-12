@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "sherpa-onnx": "^1.13.1",
     "vue": "^3.4.21"
   },
   "devDependencies": {
