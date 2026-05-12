@@ -45,16 +45,21 @@ export class SherpaKwsEngine extends BaseWakeWordEngine {
       }
 
       // Wait for FS to be available
+      // In Emscripten, FS is a global variable, not Module.FS
       const M = window.Module
       let retries = 0
-      while (!M.FS && retries < 50) {
+      while (!window.FS && !M.FS && retries < 50) {
         await new Promise((r) => setTimeout(r, 100))
         retries++
       }
-      if (!M.FS) {
-        throw new Error('Module.FS not available after 5 seconds')
+      // Prefer Module.FS if available, fallback to global FS
+      const FS = M.FS || window.FS
+      if (!FS) {
+        throw new Error('Emscripten FS not available after 5 seconds')
       }
-      console.log('[SherpaKwsEngine] Module.FS ready')
+      // Expose FS on Module for convenience
+      if (!M.FS) M.FS = FS
+      console.log('[SherpaKwsEngine] FS ready')
 
       // Manually load model files into virtual filesystem
       const filesToLoad = [
@@ -71,7 +76,7 @@ export class SherpaKwsEngine extends BaseWakeWordEngine {
           const resp = await fetch(src)
           if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
           const buf = await resp.arrayBuffer()
-          M.FS.writeFile(dst, new Uint8Array(buf))
+          FS.writeFile(dst, new Uint8Array(buf))
           console.log(`[SherpaKwsEngine] ${dst}: loaded (${buf.byteLength} bytes)`)
         } catch (e) {
           console.error(`[SherpaKwsEngine] Failed to load ${src}:`, e)
@@ -80,7 +85,7 @@ export class SherpaKwsEngine extends BaseWakeWordEngine {
       }
 
       // Read keywords
-      const keywords = M.FS.readFile('/keywords.txt', { encoding: 'utf8' })
+      const keywords = FS.readFile('/keywords.txt', { encoding: 'utf8' })
       console.log('[SherpaKwsEngine] Keywords:', keywords.trim())
 
       // Create KWS
@@ -130,9 +135,19 @@ export class SherpaKwsEngine extends BaseWakeWordEngine {
     if (!this._isInitialized) throw new Error('Not initialized')
     if (this._isListening) return
 
-    this._mediaStream = await navigator.mediaDevices.getUserMedia({
-      audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true },
-    })
+    try {
+      this._mediaStream = await navigator.mediaDevices.getUserMedia({
+        audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true },
+      })
+    } catch (err) {
+      if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+        throw new Error('未找到麦克风设备，请确认已连接麦克风并允许浏览器访问')
+      }
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        throw new Error('麦克风权限被拒绝，请在浏览器设置中允许访问麦克风')
+      }
+      throw new Error(`麦克风访问失败: ${err.message}`)
+    }
 
     this._audioContext = new AudioContext({ sampleRate: 16000 })
     this._source = this._audioContext.createMediaStreamSource(this._mediaStream)
