@@ -21,6 +21,7 @@ export const VOICE_TIMERS = {
 // ============ State Definitions ============
 export const VOICE_STATE = {
   IDLE: 'idle',
+  SPEAKING: 'speaking',
   LISTENING: 'listening',
   WAITING: 'waiting',
   CONFIRMING: 'confirming',

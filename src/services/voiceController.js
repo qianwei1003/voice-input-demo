@@ -21,6 +21,7 @@
 import { ref } from 'vue'
 import { WakeWordService } from './wakeWordService.js'
 import { speechService } from './speechService.js'
+import { mimoTtsService } from './mimoTtsService.js'
 import {
   matchEndKeyword,
   stripEndKeyword,
@@ -170,6 +171,7 @@ class VoiceController {
     this._clearAllTimers()
     this.wakeWordService.stop()
     speechService.stop()
+    mimoTtsService.stop()
     this._setState(VOICE_STATE.IDLE)
     console.log('[VoiceController] Stopped')
   }
@@ -207,7 +209,20 @@ class VoiceController {
   _onWakeWord() {
     console.log('[VoiceController] Wake word detected!')
     this._emit('wakeWord')
-    this._startListening()
+
+    // TTS 播报"在呢"，播完后开始监听
+    this._setState(VOICE_STATE.SPEAKING)
+    mimoTtsService.speak('在呢').then(() => {
+      if (this.state.value === VOICE_STATE.SPEAKING) {
+        this._startListening()
+      }
+    }).catch((err) => {
+      console.error('[VoiceController] TTS error:', err)
+      // TTS 失败也继续监听
+      if (this.state.value === VOICE_STATE.SPEAKING) {
+        this._startListening()
+      }
+    })
   }
 
   // ============ Listening Phase ============
@@ -241,6 +256,7 @@ class VoiceController {
   // ============ ASR Handlers ============
 
   _onASRResult(text) {
+    if (this.state.value === VOICE_STATE.SPEAKING) return
     if (this.state.value !== VOICE_STATE.LISTENING && this.state.value !== VOICE_STATE.WAITING && this.state.value !== VOICE_STATE.CONFIRMING) {
       return
     }
@@ -269,6 +285,7 @@ class VoiceController {
   }
 
   _onASRInterim(text) {
+    if (this.state.value === VOICE_STATE.SPEAKING) return
     if (this.state.value !== VOICE_STATE.LISTENING && this.state.value !== VOICE_STATE.WAITING && this.state.value !== VOICE_STATE.CONFIRMING) {
       return
     }
@@ -283,7 +300,8 @@ class VoiceController {
 
   _onASREnd() {
     // ASR ended (e.g., browser stopped it)
-    // Only handle if we were actively listening (not if already sending)
+    // Only handle if we were actively listening (not if speaking or already sending)
+    if (this.state.value === VOICE_STATE.SPEAKING) return
     if (this.state.value === VOICE_STATE.SENDING) return
     if (this.state.value === VOICE_STATE.LISTENING || this.state.value === VOICE_STATE.WAITING || this.state.value === VOICE_STATE.CONFIRMING) {
       console.log('[VoiceController] ASR ended unexpectedly')
@@ -438,7 +456,6 @@ class VoiceController {
 
     this._clearAllTimers()
     // Clear transcript BEFORE stopping ASR to prevent re-entrancy
-    // (stop() may fire onEnd synchronously, which checks transcript)
     this.transcript.value = ''
     this.interim.value = ''
     speechService.stop()
@@ -447,8 +464,15 @@ class VoiceController {
     console.log(`[VoiceController] Sending: "${text}"`)
     this._emit('send', text)
 
-    // Go idle after send
-    this._backToIdle()
+    // TTS 播报回复，播完后回到待机
+    const reply = `收到：${text}`
+    this._setState(VOICE_STATE.SPEAKING)
+    mimoTtsService.speak(reply).then(() => {
+      this._backToIdle()
+    }).catch((err) => {
+      console.error('[VoiceController] TTS reply error:', err)
+      this._backToIdle()
+    })
   }
 
   // ============ Timeout ============

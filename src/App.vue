@@ -87,6 +87,12 @@
       <div class="prompt-text">{{ currentPrompt }}</div>
     </div>
 
+    <!-- Reply Display -->
+    <div class="reply-box" v-if="currentReply && state === 'speaking'">
+      <div class="label">语音播报：</div>
+      <div class="reply-text">{{ currentReply }}</div>
+    </div>
+
     <!-- AI Command Display -->
     <div class="command-box" v-if="lastAICommand">
       <div class="label">AI 命令：</div>
@@ -141,6 +147,7 @@ const lang = ref('zh-CN')
 const activeEngine = ref('webspeech')
 const engineName = ref('Web Speech API')
 const currentPrompt = ref('')
+const currentReply = ref('')
 const lastAICommand = ref('')
 const eventLog = ref([])
 const porcupineEnabled = ref(WAKE_WORD_CONFIG.enabled)
@@ -151,6 +158,7 @@ const availableEngines = computed(() => speechService.getAvailableEngines())
 // State display
 const stateClass = computed(() => {
   switch (state.value) {
+    case 'speaking': return 'speaking'
     case 'listening': return 'recording'
     case 'waiting': return 'waiting'
     case 'confirming': return 'confirming'
@@ -162,6 +170,7 @@ const stateClass = computed(() => {
 const stateText = computed(() => {
   switch (state.value) {
     case 'idle': return '空闲（等待唤醒词）'
+    case 'speaking': return '语音播报中...'
     case 'listening': return '监听中...'
     case 'waiting': return '等待中（确认模式）'
     case 'confirming': return '确认中...'
@@ -222,11 +231,15 @@ function setupListeners() {
     addLog('wake', '唤醒词检测到！')
     currentPrompt.value = ''
     lastAICommand.value = ''
+    currentReply.value = '在呢'
   })
 
   voiceController.on('stateChange', (newState) => {
     state.value = newState
     addLog('state', `→ ${newState}`)
+    if (newState === 'idle') {
+      currentReply.value = ''
+    }
   })
 
   voiceController.on('transcript', (text) => {
@@ -240,6 +253,7 @@ function setupListeners() {
 
   voiceController.on('send', (text) => {
     addLog('send', `发送: "${text}"`)
+    currentReply.value = `收到：${text}`
     transcript.value = ''
     interim.value = ''
   })
@@ -325,6 +339,7 @@ h1 { margin-bottom: 4px; }
   background: #666;
 }
 .dot.recording { background: #e74c3c; animation: pulse 1s infinite; }
+.dot.speaking { background: #2ecc71; animation: pulse 0.8s infinite; }
 .dot.waiting { background: #f39c12; animation: blink 1.5s infinite; }
 .dot.confirming { background: #3498db; animation: blink 1s infinite; }
 .dot.sending { background: #27ae60; }
@@ -452,6 +467,16 @@ select {
 }
 .prompt-box .label { font-size: 12px; color: #f39c12; margin-bottom: 4px; }
 .prompt-text { color: #f39c12; font-size: 16px; }
+
+.reply-box {
+  background: #1a2a1a;
+  border: 1px solid #2ecc71;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+.reply-box .label { font-size: 12px; color: #2ecc71; margin-bottom: 4px; }
+.reply-text { color: #2ecc71; font-size: 16px; font-weight: 500; }
 
 .command-box {
   background: #1a2a1a;
